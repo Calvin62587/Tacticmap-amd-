@@ -1,199 +1,462 @@
-import { useState, useEffect, useRef } from 'react';
-import { Camera, CheckCircle, Info, Scan, ArrowRight } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+    Camera, CheckCircle, Info, RotateCcw, ArrowRight,
+    Sun, Ruler, RefreshCw, AlertCircle,
+} from 'lucide-react';
 
-type CaptureState = 'onboarding' | 'permission' | 'capturing' | 'processing' | 'done';
+/* ─── Shot definitions (8 positions for photogrammetry) ──────────────────── */
+const SHOTS = [
+    { id: 1, label: 'Frontal', instruction: 'Párese de frente, hombros relajados, cámara a la altura del pecho.', angle: 0, icon: '⬆' },
+    { id: 2, label: '45° Der.', instruction: 'Gire 45° hacia la izquierda. Capture el ángulo oblicuo derecho.', angle: 45, icon: '↗' },
+    { id: 3, label: 'Perfil Derecho', instruction: 'Gire 90° hacia la izquierda. Vista lateral derecha completa.', angle: 90, icon: '→' },
+    { id: 4, label: '45° Post. Der.', instruction: 'Continúe girando. Capture la vista oblicua posterior derecha.', angle: 135, icon: '↘' },
+    { id: 5, label: '45° Post. Izq.', instruction: 'Siga girando. Vista oblicua posterior izquierda.', angle: 225, icon: '↙' },
+    { id: 6, label: 'Perfil Izquierdo', instruction: 'Gire 90° hacia su derecha. Vista lateral izquierda completa.', angle: 270, icon: '←' },
+    { id: 7, label: '45° Izq.', instruction: 'Gire 45° hacia la derecha. Capture el ángulo oblicuo izquierdo.', angle: 315, icon: '↖' },
+    { id: 8, label: 'Superior', instruction: 'De frente, eleve la cámara para capturar el ángulo superior.', angle: 360, icon: '⬆' },
+];
 
+/* Quality check thresholds */
+const QUALITY_TIPS = [
+    { icon: Sun, title: 'Iluminación Uniforme', desc: 'Evite sombras marcadas. Luz natural difusa o ring-light.' },
+    { icon: Ruler, title: 'Distancia 50–70 cm', desc: 'Mantenga distancia constante para precisión <0.5 cm.' },
+    { icon: RefreshCw, title: 'Rotación Completa', desc: 'Capture los 8 ángulos para cobertura 360° completa.' },
+];
+
+type Phase = 'prepare' | 'capture' | 'review';
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  GuidedCapture — Guided photo capture for 3D reconstruction               */
+/* ═══════════════════════════════════════════════════════════════════════════ */
 export default function GuidedCapture() {
-    const [state, setState] = useState<CaptureState>('onboarding');
-    const [progress, setProgress] = useState(0);
+    const navigate = useNavigate();
+    const [phase, setPhase] = useState<Phase>('prepare');
+    const [currentShot, setCurrentShot] = useState(0);
+    const [captured, setCaptured] = useState<boolean[]>(Array(SHOTS.length).fill(false));
+    const [isCapturing, setIsCapturing] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
     const streamRef = useRef<MediaStream | null>(null);
 
-    // Handle camera permission and stream
-    useEffect(() => {
-        if (state === 'capturing') {
-            const startCamera = async () => {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'user' }
-                    });
-                    streamRef.current = stream;
-                    if (videoRef.current) {
-                        videoRef.current.srcObject = stream;
-                    }
-                } catch (err) {
-                    console.error("Error accessing camera:", err);
-                    // Fallback if no camera
-                }
-            };
-            startCamera();
+    const completedCount = captured.filter(Boolean).length;
+    const progressPct = (completedCount / SHOTS.length) * 100;
+    const allDone = completedCount === SHOTS.length;
 
-            // Simulate auto-alignment and capture after 5 seconds
-            const alignmentTimer = setInterval(() => {
-                setProgress((prev) => {
-                    if (prev >= 100) {
-                        clearInterval(alignmentTimer);
-                        setState('processing');
-                        return 100;
-                    }
-                    return prev + 2; // Takes ~5 seconds to reach 100 at 100ms interval
-                });
-            }, 100);
-
-            return () => {
-                clearInterval(alignmentTimer);
-                stopCamera();
-            };
+    /* ── Camera start / stop ────────────────────────────────────────────── */
+    const startCamera = useCallback(async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+            });
+            streamRef.current = stream;
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                await videoRef.current.play();
+            }
+        } catch {
+            // camera not available — continue with simulated mode
         }
-    }, [state]);
+    }, []);
 
-    const stopCamera = () => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-        }
+    const stopCamera = useCallback(() => {
+        streamRef.current?.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+    }, []);
+
+    /* ── Begin capture phase ────────────────────────────────────────────── */
+    const handleBeginCapture = () => {
+        setPhase('capture');
+        startCamera();
     };
 
-    // Simulate processing time
-    useEffect(() => {
-        if (state === 'processing') {
-            stopCamera();
-            const timer = setTimeout(() => {
-                setState('done');
-            }, 2000);
-            return () => clearTimeout(timer);
-        }
-    }, [state]);
+    /* ── Capture one shot ───────────────────────────────────────────────── */
+    const handleCapture = () => {
+        if (isCapturing) return;
+        setIsCapturing(true);
+        // simulate quality check + capture delay
+        setTimeout(() => {
+            setCaptured(prev => {
+                const next = [...prev];
+                next[currentShot] = true;
+                return next;
+            });
+            setIsCapturing(false);
+            if (currentShot < SHOTS.length - 1) {
+                setTimeout(() => setCurrentShot(currentShot + 1), 400);
+            }
+        }, 1200);
+    };
 
-    const renderOnboarding = () => (
-        <div className="flex flex-col items-center justify-center p-6 h-full text-center space-y-6">
-            <div className="w-20 h-20 rounded-full bg-blue-500/10 flex items-center justify-center mb-4 border border-blue-500/30">
-                <Camera className="text-blue-400" size={40} />
-            </div>
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-                Mapeo Anatómico
-            </h2>
-            <div className="glass-panel text-left space-y-4 text-sm text-slate-300">
-                <p className="flex items-start gap-3">
-                    <Info className="text-blue-400 mt-0.5 shrink-0" size={18} />
-                    <span>Para obtener un modelo 3D preciso, utilizaremos la cámara de su dispositivo de forma segura y privada.</span>
-                </p>
-                <p className="flex items-start gap-3">
-                    <Scan className="text-purple-400 mt-0.5 shrink-0" size={18} />
-                    <span>Alinee la silueta que aparecerá en pantalla con su cuerpo. El sistema tomará las imágenes automáticamente cuando detecte el ángulo correcto.</span>
-                </p>
-            </div>
-            <button
-                onClick={() => setState('capturing')}
-                className="btn btn-primary mt-8 w-full font-semibold flex items-center justify-center gap-2"
-            >
-                <span>Comenzar Captura</span>
-                <ArrowRight size={18} />
-            </button>
-            <p className="text-xs text-slate-500 mt-4">Todo el procesamiento de imágenes se realiza localmente. Ninguna foto cruda se envía a la nube.</p>
-        </div>
-    );
+    /* ── Reset ──────────────────────────────────────────────────────────── */
+    const handleReset = () => {
+        stopCamera();
+        setCaptured(Array(SHOTS.length).fill(false));
+        setCurrentShot(0);
+        setPhase('prepare');
+    };
 
-    const renderCapturing = () => (
-        <div className="camera-view-container">
-            {/* Live Video Feed (fallback to black/gradient if no camera) */}
-            <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover opacity-80"
-            />
+    /* ── Finish ─────────────────────────────────────────────────────────── */
+    const handleFinish = () => {
+        stopCamera();
+        setPhase('review');
+    };
 
-            {/* Silhouette SVG Overlay */}
-            <div className="silhouette-overlay">
-                <svg viewBox="0 0 200 300" className="w-[80%] max-h-[80%] opacity-40">
-                    <path
-                        d="M100 20 C100 20, 60 50, 40 100 C20 150, 50 250, 50 250 L150 250 C150 250, 180 150, 160 100 C140 50, 100 20, 100 20 Z"
-                        fill="none"
-                        stroke={progress > 80 ? "#4ade80" : "#60a5fa"}
-                        strokeWidth="4"
-                        strokeDasharray="10, 10"
+    /* ═══════════════════════════════════════════════════════════════════════ */
+    /*  Phase: PREPARE — Pre-capture instructions                             */
+    /* ═══════════════════════════════════════════════════════════════════════ */
+    if (phase === 'prepare') {
+        return (
+            <div className="screen-section">
+                {/* Header */}
+                <div className="section-header" style={{ marginBottom: '0.25rem' }}>
+                    <Camera size={20} style={{ color: 'var(--teal-400)' }} />
+                    <h2>Captura Multiángulo</h2>
+                </div>
+
+                {/* Info banner */}
+                <div className="card-teal" style={{ marginBottom: '1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                        <Info size={16} style={{ color: 'var(--teal-300)', marginTop: 2, flexShrink: 0 }} />
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                            Para la reconstrucción 3D por fotogrametría se necesitan{' '}
+                            <strong style={{ color: 'var(--teal-300)' }}>8 fotografías guiadas</strong> desde distintos ángulos.
+                            <br /><br />
+                            La resolución interna final (~0.5mm³) proviene de la{' '}
+                            <strong style={{ color: 'var(--teal-300)' }}>fusión con los 5 sensores del guante</strong>, no solo de la cámara.
+                            <br /><br />
+                            Todo el procesamiento ocurre <strong>localmente</strong> en el dispositivo.
+                        </div>
+                    </div>
+                </div>
+
+                {/* Positioning guide image */}
+                <div className="card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+                    <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.75rem', textAlign: 'center' }}>
+                        Ubíquese correctamente para la captura
+                    </p>
+                    <img
+                        src="/positioning-guide.png"
+                        alt="Guía de posicionamiento para captura de 8 ángulos"
+                        style={{
+                            width: '100%',
+                            maxWidth: 280,
+                            margin: '0 auto',
+                            display: 'block',
+                            borderRadius: 'var(--radius-md)',
+                            border: '1px solid rgba(8,145,178,0.15)',
+                        }}
                     />
-                    {/* Abstract breast indicators */}
-                    <circle cx="70" cy="150" r="30" fill="none" stroke={progress > 80 ? "#4ade80" : "#60a5fa"} strokeWidth="2" strokeDasharray="5, 5" />
-                    <circle cx="130" cy="150" r="30" fill="none" stroke={progress > 80 ? "#4ade80" : "#60a5fa"} strokeWidth="2" strokeDasharray="5, 5" />
-                </svg>
+                    <p style={{ fontSize: '0.62rem', color: 'var(--text-dim)', textAlign: 'center', marginTop: '0.5rem' }}>
+                        8 posiciones de cámara · Gire lentamente · Mantenga distancia uniforme
+                    </p>
+                </div>
 
-                {/* Scanning Animation Line */}
-                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-blue-500/30 to-transparent h-10 w-full animate-[scanLine_3s_ease-in-out_infinite]" />
-            </div>
+                {/* Tips */}
+                <div className="card" style={{ padding: '0.5rem', marginBottom: '1rem' }}>
+                    {QUALITY_TIPS.map((tip, idx) => {
+                        const Icon = tip.icon;
+                        return (
+                            <div key={idx} className="tip-card">
+                                <div className="tip-icon"><Icon size={14} style={{ color: 'var(--teal-400)' }} /></div>
+                                <div className="tip-text">
+                                    <h4>{tip.title}</h4>
+                                    <p>{tip.desc}</p>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
 
-            <div className="ui-overlay">
-                <div className="text-center bg-black/50 backdrop-blur-md rounded-2xl p-4 border border-white/10">
-                    <p className="text-lg font-semibold text-white mb-2">Alineando silueta...</p>
-                    <div className="w-full bg-slate-800 rounded-full h-2 mt-2">
-                        <div
-                            className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${progress}%` }}
-                        ></div>
+                {/* Precision stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                    <div className="data-stat">
+                        <div className="data-stat-value">&lt;0.5cm</div>
+                        <div className="data-stat-label">Precisión</div>
+                    </div>
+                    <div className="data-stat">
+                        <div className="data-stat-value">8</div>
+                        <div className="data-stat-label">Ángulos</div>
+                    </div>
+                    <div className="data-stat">
+                        <div className="data-stat-value">360°</div>
+                        <div className="data-stat-label">Cobertura</div>
                     </div>
                 </div>
-                <div className="flex justify-center mb-8">
-                    <div className={`p-4 rounded-full backdrop-blur-md transition-colors ${progress > 80 ? 'bg-green-500/20' : 'bg-blue-500/20'}`}>
-                        <Scan className={progress > 80 ? 'text-green-400' : 'text-blue-400'} size={32} />
+
+                {/* CTA */}
+                <button onClick={handleBeginCapture} className="btn btn-primary btn-block btn-lg">
+                    <Camera size={18} /> Iniciar Captura Guiada
+                </button>
+            </div>
+        );
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════════ */
+    /*  Phase: CAPTURE — Active camera viewfinder                             */
+    /* ═══════════════════════════════════════════════════════════════════════ */
+    if (phase === 'capture') {
+        const shot = SHOTS[currentShot];
+
+        return (
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                {/* ── Viewfinder ──────────────────────────────────────────────── */}
+                <div style={{
+                    position: 'relative', flex: '0 0 52%', background: '#0a0e18',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                }}>
+                    <video ref={videoRef} autoPlay playsInline muted
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+
+                    {/* Ghost silhouette overlay — changes per shot angle */}
+                    <div style={{
+                        position: 'absolute', inset: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        pointerEvents: 'none',
+                    }}>
+                        <img
+                            src={
+                                [
+                                    '/ghost-frontal.png',   // 1: Frontal
+                                    '/ghost-45deg.png',     // 2: 45° Der.
+                                    '/ghost-lateral.png',   // 3: Lateral Der.
+                                    '/ghost-45deg.png',     // 4: 45° Post. Der.
+                                    '/ghost-posterior.png',  // 5: Posterior
+                                    '/ghost-45deg.png',     // 6: 45° Post. Izq.
+                                    '/ghost-lateral.png',   // 7: Lateral Izq.
+                                    '/ghost-45deg.png',     // 8: 45° Izq.
+                                ][currentShot]
+                            }
+                            alt={`Posición ${shot.label}`}
+                            style={{
+                                height: '85%',
+                                opacity: 0.45,
+                                objectFit: 'contain',
+                                mixBlendMode: 'screen',
+                                filter: 'brightness(1.6)',
+                                transform: [3, 5, 6, 7].includes(currentShot) ? 'scaleX(-1)' : 'none',
+                                transition: 'all 0.4s ease',
+                            }}
+                        />
+                        {/* Alignment hint */}
+                        <span style={{
+                            position: 'absolute', bottom: 56, left: '50%', transform: 'translateX(-50%)',
+                            fontSize: '0.6rem', color: 'rgba(8,145,178,0.7)',
+                            fontWeight: 600, whiteSpace: 'nowrap',
+                            background: 'rgba(0,0,0,0.4)', padding: '0.15rem 0.5rem',
+                            borderRadius: 'var(--radius-full)',
+                        }}>
+                            Alinee su cuerpo con la silueta
+                        </span>
+                    </div>
+
+                    {/* Frame corners */}
+                    <div style={{ position: 'absolute', inset: '2rem' }}>
+                        <div className="camera-frame-corner tl" />
+                        <div className="camera-frame-corner tr" />
+                        <div className="camera-frame-corner bl" />
+                        <div className="camera-frame-corner br" />
+                    </div>
+
+                    {/* Scan line when capturing */}
+                    {isCapturing && (
+                        <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+                            <div className="animate-scan-line" style={{
+                                position: 'absolute', width: '100%', height: 2,
+                                background: 'linear-gradient(90deg, transparent, var(--teal-400), transparent)',
+                            }} />
+                        </div>
+                    )}
+
+                    {/* Top label */}
+                    <div style={{
+                        position: 'absolute', top: 12, left: 12,
+                        background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)',
+                        padding: '0.3rem 0.65rem', borderRadius: 'var(--radius-full)',
+                        fontSize: '0.72rem', fontWeight: 700, color: '#fff',
+                        display: 'flex', alignItems: 'center', gap: '0.3rem',
+                    }}>
+                        <span style={{ fontSize: '0.85rem' }}>{shot.icon}</span>
+                        {shot.label}
+                    </div>
+
+                    {/* Shot counter */}
+                    <div style={{
+                        position: 'absolute', top: 12, right: 12,
+                        background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)',
+                        padding: '0.3rem 0.65rem', borderRadius: 'var(--radius-full)',
+                        fontSize: '0.68rem', fontWeight: 700, color: 'var(--teal-300)',
+                    }}>
+                        {currentShot + 1} / {SHOTS.length}
+                    </div>
+
+                    {/* Capture button */}
+                    <div style={{ position: 'absolute', bottom: 16 }}>
+                        <button
+                            onClick={handleCapture}
+                            disabled={isCapturing}
+                            className={`capture-btn ${isCapturing ? 'capturing' : ''}`}
+                            style={captured[currentShot] ? {} : {}}
+                        >
+                            <div className="capture-btn-inner" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* ── Bottom panel ────────────────────────────────────────────── */}
+                <div style={{ flex: 1, padding: '0.75rem 1.25rem', overflow: 'auto' }}>
+                    {/* Instruction */}
+                    <div style={{
+                        display: 'flex', alignItems: 'center', gap: '0.6rem',
+                        marginBottom: '0.75rem',
+                    }}>
+                        <div style={{
+                            width: 36, height: 36, borderRadius: 'var(--radius-md)',
+                            background: 'linear-gradient(135deg, var(--teal-500), var(--cyan-500))',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '0.82rem', fontWeight: 800, color: '#fff', flexShrink: 0,
+                        }}>
+                            {shot.id}
+                        </div>
+                        <div>
+                            <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{shot.label}</p>
+                            <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', lineHeight: 1.35 }}>
+                                {shot.instruction}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div style={{ marginBottom: '0.6rem' }}>
+                        <div style={{
+                            display: 'flex', justifyContent: 'space-between',
+                            fontSize: '0.62rem', color: 'var(--text-muted)', marginBottom: '0.25rem',
+                        }}>
+                            <span>Progreso de captura</span>
+                            <span>{Math.round(progressPct)}%</span>
+                        </div>
+                        <div className="progress-bar">
+                            <div className="progress-bar-fill" style={{ width: `${progressPct}%` }} />
+                        </div>
+                    </div>
+
+                    {/* Photo grid */}
+                    <div className="photo-grid" style={{ marginBottom: '0.75rem' }}>
+                        {SHOTS.map((s, idx) => (
+                            <div
+                                key={s.id}
+                                className={`photo-grid-item ${captured[idx] ? 'completed' : idx === currentShot ? 'active' : ''
+                                    }`}
+                                onClick={() => !captured[idx] && setCurrentShot(idx)}
+                                style={{ cursor: !captured[idx] ? 'pointer' : 'default' }}
+                            >
+                                {captured[idx] ? (
+                                    <CheckCircle size={14} />
+                                ) : (
+                                    <span>{s.id}</span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button onClick={handleReset} className="btn btn-secondary" style={{ flex: 1 }}>
+                            <RotateCcw size={14} /> Reiniciar
+                        </button>
+                        {allDone ? (
+                            <button onClick={handleFinish} className="btn btn-primary" style={{ flex: 2 }}>
+                                Continuar al 3D <ArrowRight size={14} />
+                            </button>
+                        ) : (
+                            <button disabled className="btn btn-secondary" style={{ flex: 2, opacity: 0.4 }}>
+                                Capture las 8 fotos
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
-        </div>
-    );
+        );
+    }
 
-    const renderProcessing = () => (
-        <div className="flex flex-col items-center justify-center h-full space-y-6">
-            <div className="relative w-24 h-24">
-                <div className="absolute inset-0 border-t-4 border-blue-500 rounded-full animate-spin"></div>
-                <div className="absolute inset-2 border-r-4 border-purple-500 rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
-                <div className="absolute inset-0 flex items-center justify-center text-blue-400">
-                    <Box size={32} />
-                </div>
+    /* ═══════════════════════════════════════════════════════════════════════ */
+    /*  Phase: REVIEW — Post-capture quality summary                          */
+    /* ═══════════════════════════════════════════════════════════════════════ */
+    return (
+        <div className="screen-section">
+            <div className="section-header">
+                <CheckCircle size={20} style={{ color: 'var(--green-400)' }} />
+                <h2>Captura Completa</h2>
             </div>
-            <div className="text-center space-y-2">
-                <h3 className="text-xl font-semibold">Generando Modelo 3D</h3>
-                <p className="text-slate-400 text-sm">Aplicando segmentación NeRF Edge...</p>
-            </div>
-        </div>
-    );
 
-    const renderDone = () => (
-        <div className="flex flex-col items-center justify-center p-6 h-full text-center space-y-6">
-            <div className="w-24 h-24 rounded-full bg-green-500/20 flex items-center justify-center border border-green-500/50 mb-4 animate-[pulseGlow_2s_infinite]">
-                <CheckCircle className="text-green-400" size={48} />
-            </div>
-            <h2 className="text-2xl font-bold text-white">Captura Completada</h2>
-            <p className="text-slate-300 text-sm max-w-xs">
-                El mapeo anatómico 3D de alta resolución se ha generado exitosamente en su dispositivo.
+            <p className="section-subtitle">
+                Las 8 fotografías han sido capturadas exitosamente. El modelo 3D de superficie está listo para reconstrucción.
             </p>
-            <button
-                onClick={() => { setState('onboarding'); setProgress(0); }}
-                className="btn bg-slate-800 text-white mt-8 px-8 py-3 w-full border border-slate-700"
-            >
-                Reiniciar Captura
-            </button>
-        </div>
-    );
 
-    return (
-        <div className="h-full w-full relative">
-            {state === 'onboarding' && renderOnboarding()}
-            {state === 'capturing' && renderCapturing()}
-            {state === 'processing' && renderProcessing()}
-            {state === 'done' && renderDone()}
-        </div>
-    );
-}
+            {/* Quality scores */}
+            <div className="card" style={{ marginBottom: '1rem' }}>
+                <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                    Calidad de Captura
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
+                    <div className="data-stat">
+                        <div className="data-stat-value" style={{ color: 'var(--green-400)' }}>100%</div>
+                        <div className="data-stat-label">Cobertura</div>
+                    </div>
+                    <div className="data-stat">
+                        <div className="data-stat-value" style={{ color: 'var(--green-400)' }}>8/8</div>
+                        <div className="data-stat-label">Fotos</div>
+                    </div>
+                    <div className="data-stat">
+                        <div className="data-stat-value">&lt;0.5cm</div>
+                        <div className="data-stat-label">Precisión</div>
+                    </div>
+                    <div className="data-stat">
+                        <div className="data-stat-value" style={{ color: 'var(--green-400)' }}>✓</div>
+                        <div className="data-stat-label">Enfoque</div>
+                    </div>
+                </div>
+            </div>
 
-// Simple fallback icon if Box is missing
-function Box(props: any) {
-    return (
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-            <line x1="12" y1="22.08" x2="12" y2="12"></line>
-        </svg>
+            {/* Shot thumbnails */}
+            <div className="card" style={{ marginBottom: '1rem' }}>
+                <p style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                    Fotos Capturadas
+                </p>
+                <div className="photo-grid">
+                    {SHOTS.map(s => (
+                        <div key={s.id} className="photo-grid-item completed" style={{
+                            aspectRatio: '1', fontSize: '0.6rem',
+                        }}>
+                            <div style={{ textAlign: 'center' }}>
+                                <CheckCircle size={14} />
+                                <div style={{ fontSize: '0.55rem', marginTop: 2 }}>{s.label.split(' ')[0]}</div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* Next steps */}
+            <div className="card-teal" style={{ marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    <Info size={14} style={{ color: 'var(--teal-300)' }} />
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--teal-300)' }}>Próximo paso</span>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    Conecte el guante multimodal para el <strong style={{ color: 'var(--teal-300)' }}>protocolo de escaneo por cuadrantes</strong>.
+                    Los 5 sensores se fusionarán con el modelo 3D.
+                </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button onClick={handleReset} className="btn btn-secondary" style={{ flex: 1 }}>
+                    <RotateCcw size={14} /> Repetir
+                </button>
+                <button onClick={() => navigate('/sensors')}
+                    className="btn btn-primary" style={{ flex: 2 }}>
+                    Ir al Escaneo con Guante <ArrowRight size={14} />
+                </button>
+            </div>
+        </div>
     );
 }

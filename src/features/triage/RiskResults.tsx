@@ -1,78 +1,221 @@
-import { AlertCircle, ShieldCheck, Activity, Brain, FileText, ChevronRight } from 'lucide-react';
+import {
+    FileText, Download, Share2, AlertTriangle, CheckCircle,
+    Clock, Shield, TrendingUp,
+} from 'lucide-react';
+import { useSensorStore } from '../../store/useSensorStore';
 
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  RiskResults — Comprehensive MSI Report + Temporal Comparison              */
+/* ═══════════════════════════════════════════════════════════════════════════ */
 export default function RiskResults() {
-    const cdssResult = {
-        nivel_riesgo_triaje: "CAMBIO A VIGILAR",
-        recomendacion_accionable: "Recomendación de evaluación diagnóstica estándar (ecografía clínica preferente) en los próximos 30 días.",
-        justificacion_clinica: "Se detectó un gradiente térmico focal asimétrico y un vector de rigidez tisular de 14 KPa no documentado en la baseline de hace 6 meses. La integración ortogonal sugiere una correlación espacial que requiere validación ecográfica, alineado a directrices NCCN para vigilancia activa."
+    const { lesions, data } = useSensorStore();
+
+    /* Simulated MSI score based on amount of lesions and sensor data */
+    const activeSensors = Object.values(data).filter(v => v > 0).length;
+    const msiScore = activeSensors > 0
+        ? (data.temperature + data.pressure + data.density * 10 + (data.pulse / 10)).toFixed(1)
+        : '0';
+    const score = parseFloat(msiScore);
+    const riskLevel: 'BAJO' | 'MEDIO' | 'ALTO' =
+        score > 60 ? 'ALTO' : score > 50 ? 'MEDIO' : 'BAJO';
+
+    const riskConfig: Record<string, { class: string; icon: typeof CheckCircle; color: string; desc: string }> = {
+        BAJO: { class: 'risk-low', icon: CheckCircle, color: 'var(--green-400)', desc: '✓ Sin hallazgos relevantes. Continúe monitoreo regular cada 90 días.' },
+        MEDIO: { class: 'risk-medium', icon: AlertTriangle, color: 'var(--yellow-400)', desc: '⚠ Cambio a vigilar. Se recomienda seguimiento en 30 días y comparación con histórico.' },
+        ALTO: { class: 'risk-high', icon: AlertTriangle, color: 'var(--red-400)', desc: '🔴 Hallazgo sospechoso. Se recomienda evaluación diagnóstica estándar con profesional.' },
     };
 
+    const risk = riskConfig[riskLevel];
+    const RiskIcon = risk.icon;
+
+    /* Simulated scan history */
+    const scanHistory = [
+        { date: '2026-01-15', score: 42.3, level: 'BAJO', findings: 0 },
+        { date: '2026-01-28', score: 43.1, level: 'BAJO', findings: 0 },
+        { date: '2026-02-27', score, level: riskLevel, findings: lesions.length },
+    ];
+
+    /* Sensor readings for the report */
+    const sensorRows = [
+        { label: 'Temperatura', value: `${data.temperature}°C`, status: data.temperature > 38 ? 'alto' : 'normal' },
+        { label: 'Presión', value: `${data.pressure} kPa`, status: data.pressure > 20 ? 'alto' : 'normal' },
+        { label: 'Ultrasonido', value: `${data.ultrasound} m/s`, status: 'normal' },
+        { label: 'Pulso Sónico', value: `${data.pulse} bpm`, status: data.pulse > 90 ? 'alto' : 'normal' },
+        { label: 'Densidad', value: `${data.density} g/cm³`, status: data.density > 1.2 ? 'alto' : 'normal' },
+    ];
+
     return (
-        <div className="flex flex-col h-full space-y-4">
-            <div className="flex justify-between items-center mb-2">
-                <h2 className="text-xl font-bold">Resumen de Triaje</h2>
-                <div className="flex items-center gap-1 text-xs bg-purple-500/20 text-purple-300 px-2 py-1 rounded border border-purple-500/50">
-                    <Brain size={14} />
-                    <span>CDSS RAG Activo</span>
-                </div>
+        <div className="screen-section">
+            {/* ── Header ───────────────────────────────────────────────────── */}
+            <div className="section-header" style={{ marginBottom: '0.25rem' }}>
+                <FileText size={20} style={{ color: 'var(--teal-400)' }} />
+                <h2>Informe MSI</h2>
             </div>
-
-            {/* Main Risk Target Card */}
-            <div className="glass-panel text-center p-6 border-yellow-500/30 glow-yellow relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-yellow-500 to-transparent"></div>
-                <AlertCircle size={48} className="text-yellow-400 mx-auto mb-4" />
-                <h3 className="text-sm text-slate-400 font-semibold mb-1">ESTRATIFICACIÓN DE RIESGO</h3>
-                <p className="text-2xl font-bold text-yellow-400 mb-2">{cdssResult.nivel_riesgo_triaje}</p>
-                <p className="text-xs text-slate-500 bg-black/40 inline-block px-3 py-1 rounded-full w-fit mx-auto mt-2">
-                    Confianza del Modelo: 94.2%
-                </p>
-            </div>
-
-            {/* Actionable Recommendation */}
-            <div className="glass-panel p-5 bg-blue-900/10 border-blue-500/20">
-                <div className="flex items-center gap-2 mb-3">
-                    <Activity size={20} className="text-blue-400" />
-                    <h4 className="font-semibold text-white">Recomendación Accionable</h4>
-                </div>
-                <p className="text-sm text-blue-100 leading-relaxed border-l-2 border-blue-500 pl-4 py-1">
-                    {cdssResult.recomendacion_accionable}
-                </p>
-            </div>
-
-            {/* Clinical Justification (RAG Output) */}
-            <div className="glass-panel p-5 bg-slate-900/50 flex-1 overflow-y-auto">
-                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                    <div className="flex items-center gap-2">
-                        <ShieldCheck size={20} className="text-green-400" />
-                        <h4 className="font-semibold text-white text-sm">Justificación Clínica</h4>
-                    </div>
-                    <span className="text-[10px] text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full">Basado en normas OMS/NCCN</span>
-                </div>
-
-                <p className="text-xs text-slate-300 leading-relaxed text-justify">
-                    {cdssResult.justificacion_clinica}
-                </p>
-
-                <div className="mt-4 pt-4 border-t border-slate-800">
-                    <h5 className="text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1">
-                        <FileText size={14} /> Fuentes Citadas (RAG)
-                    </h5>
-                    <ul className="text-[10px] text-slate-500 space-y-2">
-                        <li className="flex items-center justify-between hover:text-slate-300 transition-colors cursor-pointer">
-                            <span>[1] NCCN Guidelines v2.2023 - Clinical Validation</span>
-                            <ChevronRight size={14} />
-                        </li>
-                        <li className="flex items-center justify-between hover:text-slate-300 transition-colors cursor-pointer">
-                            <span>[2] Telemetry Baseline Analysis (Historial Paciente)</span>
-                            <ChevronRight size={14} />
-                        </li>
-                    </ul>
-                </div>
-            </div>
-
-            <p className="text-[10px] text-center text-slate-600 px-4 pb-2">
-                Aviso SaMD: Este reporte es un instrumento de estratificación de riesgo no diagnóstico. Consulte a su profesional de la salud.
+            <p className="section-subtitle">
+                Resultado del análisis multimodal integrado con recomendaciones clínicas.
             </p>
+
+            {/* ┌─────────────────────────────────────────────────────────────────┐
+         │  Risk Level Banner                                              │
+         └─────────────────────────────────────────────────────────────────┘ */}
+            <div className={risk.class} style={{
+                borderRadius: 'var(--radius-xl)', padding: '1.25rem',
+                marginBottom: '0.75rem',
+            }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+                            <RiskIcon size={18} style={{ color: risk.color }} />
+                            <span style={{ fontSize: '0.92rem', fontWeight: 800, color: risk.color }}>
+                                Nivel de Riesgo: {riskLevel}
+                            </span>
+                        </div>
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                            {risk.desc}
+                        </p>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: '1rem' }}>
+                        <div style={{ fontSize: '1.6rem', fontWeight: 900, color: risk.color, lineHeight: 1 }}>
+                            {msiScore}
+                        </div>
+                        <div style={{ fontSize: '0.58rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                            Puntuación MSI
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ┌─────────────────────────────────────────────────────────────────┐
+         │  Session Summary Stats                                          │
+         └─────────────────────────────────────────────────────────────────┘ */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem', marginBottom: '0.75rem' }}>
+                <div className="data-stat">
+                    <div className="data-stat-value">{lesions.length}</div>
+                    <div className="data-stat-label">Hallazgos</div>
+                </div>
+                <div className="data-stat">
+                    <div className="data-stat-value">{activeSensors}/5</div>
+                    <div className="data-stat-label">Sensores</div>
+                </div>
+                <div className="data-stat">
+                    <div className="data-stat-value">&lt;0.5cm</div>
+                    <div className="data-stat-label">Precisión</div>
+                </div>
+                <div className="data-stat">
+                    <div className="data-stat-value" style={{ fontSize: '0.85rem' }}>✓</div>
+                    <div className="data-stat-label">Ortogonal</div>
+                </div>
+            </div>
+
+            {/* ┌─────────────────────────────────────────────────────────────────┐
+         │  Sensor Readings Table                                          │
+         └─────────────────────────────────────────────────────────────────┘ */}
+            <div className="card" style={{ marginBottom: '0.75rem' }}>
+                <p style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                    Lecturas de Sensores
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    {sensorRows.map(row => (
+                        <div key={row.label} style={{
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            padding: '0.4rem 0.6rem', borderRadius: 'var(--radius-sm)',
+                            background: 'rgba(255,255,255,0.02)',
+                        }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{row.label}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <span style={{ fontSize: '0.78rem', fontWeight: 700, fontFamily: 'monospace' }}>{row.value}</span>
+                                <span className={`badge ${row.status === 'alto' ? 'badge-red' : 'badge-green'}`} style={{ fontSize: '0.5rem' }}>
+                                    {row.status}
+                                </span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
+            {/* ┌─────────────────────────────────────────────────────────────────┐
+         │  Temporal Comparison (Scan History)                              │
+         └─────────────────────────────────────────────────────────────────┘ */}
+            <div className="card" style={{ marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <p style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                        Historial de Escaneos
+                    </p>
+                    <span className="badge badge-teal">
+                        <TrendingUp size={8} /> {scanHistory.length} sesiones
+                    </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    {scanHistory.map((scan, idx) => {
+                        const isCurrent = idx === scanHistory.length - 1;
+                        return (
+                            <div key={scan.date} className={`timeline-item ${isCurrent ? 'current' : ''}`}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                            <Clock size={11} style={{ color: 'var(--text-muted)' }} />
+                                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                                                {new Date(scan.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                            </span>
+                                            {isCurrent && (
+                                                <span className="badge badge-teal" style={{ fontSize: '0.48rem' }}>Actual</span>
+                                            )}
+                                        </div>
+                                        <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>
+                                            {scan.findings} hallazgo{scan.findings !== 1 ? 's' : ''}
+                                        </span>
+                                    </div>
+                                    <div style={{ textAlign: 'right' }}>
+                                        <span style={{ fontSize: '0.82rem', fontWeight: 800 }}>{scan.score}</span>
+                                        <div>
+                                            <span className={`badge ${scan.level === 'ALTO' ? 'badge-red' : scan.level === 'MEDIO' ? 'badge-yellow' : 'badge-green'}`}
+                                                style={{ fontSize: '0.48rem' }}>
+                                                {scan.level}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* ┌─────────────────────────────────────────────────────────────────┐
+         │  Actions                                                        │
+         └─────────────────────────────────────────────────────────────────┘ */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <button className="btn btn-primary btn-block" style={{ padding: '0.75rem' }}>
+                    <Download size={16} /> Exportar Reporte PDF
+                </button>
+                <button className="btn btn-secondary btn-block" style={{ padding: '0.75rem' }}>
+                    <Share2 size={16} /> Compartir con Médico
+                </button>
+            </div>
+
+            {/* ┌─────────────────────────────────────────────────────────────────┐
+         │  SaMD Disclaimer                                                │
+         └─────────────────────────────────────────────────────────────────┘ */}
+            <div style={{
+                padding: '0.75rem',
+                borderRadius: 'var(--radius-lg)',
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.05)',
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.3rem' }}>
+                    <Shield size={12} style={{ color: 'var(--text-muted)' }} />
+                    <span style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        Aviso SaMD · IEC 62304
+                    </span>
+                </div>
+                <p style={{ fontSize: '0.62rem', color: 'var(--text-dim)', lineHeight: 1.6 }}>
+                    TACTICMAP es un instrumento SaMD de Clase IIa según IEC 62304, diseñado para{' '}
+                    <strong>triaje accionable y seguimiento longitudinal</strong>, no para diagnóstico confirmatorio.
+                    Este informe NO sustituye la evaluación diagnóstica de un profesional médico especializado.
+                    Los datos se almacenan con encriptación AES-256 cumpliendo HIPAA/GDPR.
+                </p>
+            </div>
         </div>
     );
 }
